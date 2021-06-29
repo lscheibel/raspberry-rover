@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link rel="stylesheet" href="https://cdn.maptiler.com/ol/v6.0.0/ol.css" type="text/css">
+  <script src="https://cdn.maptiler.com/ol/v6.0.0/ol.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
+  <script src="https://cdn.socket.io/4.1.2/socket.io.min.js" integrity="sha384-toS6mmwu70G0fw54EGlWWeA4z3dyJ+dlXBtSURSKN4vyRFOcxd3Bzjj/AoOwY+Rg" crossorigin="anonymous"></script>
+
+  <style>
+      #map {position: absolute; top: 0; right: 0; bottom: 0; left: 0;}
+      #overlay {position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 1; pointer-events: none;}
+      #overlay .info {background: white; border-radius: 3px; box-shadow: 0 6px 3px rgba(255, 255, 255, 0.6);}
+      .control-input {
+          --width: 6rem;
+          -webkit-appearance: none;
+          width: 80vh;
+          position: fixed;
+          border-radius: 1rem;
+          pointer-events: all;
+          top: 100%;
+          height: var(--width);
+          background: rgba(128,128,128,0.2);
+      }
+      input[type=range]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: var(--width);
+          height: var(--width);
+          border-radius: 1rem;
+          background: white;
+      }
+      #leftControl {left: 0; transform: rotate(270deg); transform-origin: top left;}
+      #rightControl {right: 0; transform-origin: top right; transform: rotate(90deg);}
+  </style>
+</head>
+<body>
+<div id="map">
+<div id="overlay">
+  <div class="info" id="heading"></div>
+  <div class="info" id="position"></div>
+  <div id='controls'>
+    <input class="control-input" type="range" id="leftControl" name="left" min="-1" max="1" step="0.01">
+    <input class="control-input" type="range" id="rightControl" name="right" min="-1" max="1" step="0.01">
+  </div>
+</div>
+</div>
+<script>
+  const $ = (q, p = document) => p.querySelector(q);
+  const $$ = (q, p = document) => [...p.querySelectorAll(q)];
+
+  const source = new ol.source.TileJSON({
+    url: 'https://api.maptiler.com/tiles/satellite/tiles.json?key=2ld9SopTscKQ4PaGyHo7',
+    tileSize: 256,
+    crossOrigin: 'anonymous'
+  });
+
+  const map = new ol.Map({
+    layers: [
+      new ol.layer.Tile({
+        source: source
+      })
+    ],
+    target: 'map',
+    view: new ol.View({
+      constrainResolution: true,
+      center: [0, 0],
+      zoom: 2
+    })
+  });
+
+  let roverPoint = null;
+
+  function setupRoverPoint(coordinates) {
+    roverPoint = new ol.geom.Point(ol.proj.fromLonLat(coordinates));
+
+    const layer = new ol.layer.Vector({
+      source: new ol.source.Vector({
+        features: [
+          new ol.Feature({
+            geometry: roverPoint
+          })
+        ]
+      })
+    });
+
+    map.addLayer(layer);
+  }
+
+  const socket = io();
+
+  socket.on("connect", () => {
+    console.log("WebSocket connected:", socket.id); // x8WIv7-mJelg7on_ALbx
+  });
+
+  socket.on("connect_error", () => {
+    console.log("Websocket failed to connect:", socket.id); // undefined
+  });
+
+  socket.on('position', (gpsData) => {
+    const coordinates = [gpsData.lon, gpsData.lat];
+
+    if (!roverPoint) {
+      setupRoverPoint(coordinates);
+    } else {
+      roverPoint.setCoordinates(ol.proj.fromLonLat(coordinates));
+    }
+
+    $('#position').innerText = `lat: ${gpsData.lat}; lon: ${gpsData.lon}`
+  })
+
+  socket.on('heading', (heading) => {
+    $('#heading').innerText = `${heading} deg`;
+  })
+
+  const control = {left: 0, right: 0};
+
+  const emitControls = _.throttle(() => {
+    socket.emit('control', control);
+    console.log('emited controls', JSON.stringify(control));
+  }, 200)
+
+  $$('.control-input').forEach(input => {
+    input.addEventListener('input', (e) => {
+      control[e.target.name] = e.target.value;
+      emitControls();
+    })
+
+    input.addEventListener('mouseup', (e) => {
+      input.value = 0;
+      control[e.target.name] = 0;
+      socket.emit('control', control);
+    })
+  })
+</script>
+
+</body>
+
+</html>
