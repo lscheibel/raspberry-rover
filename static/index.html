@@ -2,14 +2,15 @@
 <html>
 <head>
   <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <link rel="stylesheet" href="https://cdn.maptiler.com/ol/v6.0.0/ol.css" type="text/css">
-  <script src="https://cdn.maptiler.com/ol/v6.0.0/ol.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.5.0/css/ol.css" type="text/css">
+  <script src="https://cdn.jsdelivr.net/gh/openlayers/openlayers.github.io@master/en/v6.5.0/build/ol.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
   <script src="https://cdn.socket.io/4.1.2/socket.io.min.js" integrity="sha384-toS6mmwu70G0fw54EGlWWeA4z3dyJ+dlXBtSURSKN4vyRFOcxd3Bzjj/AoOwY+Rg" crossorigin="anonymous"></script>
 
   <style>
-      #map {position: absolute; top: 0; right: 0; bottom: 0; left: 0;}
-      #overlay {position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 1; pointer-events: none;}
+      #map {position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+          z-index: -1;}
+      #overlay {position: absolute; top: 0; right: 0; left: 0; z-index: 99;}
       #overlay .info {background: white; border-radius: 3px; box-shadow: 0 6px 3px rgba(255, 255, 255, 0.6);}
       .control-input {
           --width: 6rem;
@@ -31,18 +32,20 @@
       }
       #leftControl {left: 0; transform: rotate(270deg); transform-origin: top left;}
       #rightControl {right: 0; transform-origin: top right; transform: rotate(90deg);}
+      #autonomous {z-index: 99;}
   </style>
 </head>
 <body>
-<div id="map">
+<div id="map"></div>
 <div id="overlay">
   <div class="info" id="heading"></div>
   <div class="info" id="position"></div>
+  <button id='autonomous'>Go autonomous!</button>
+  <button id='find'>Go find something!</button>
   <div id='controls'>
     <input class="control-input" type="range" id="leftControl" name="left" min="-1" max="1" step="0.01">
     <input class="control-input" type="range" id="rightControl" name="right" min="-1" max="1" step="0.01">
   </div>
-</div>
 </div>
 <script>
   const $ = (q, p = document) => p.querySelector(q);
@@ -54,6 +57,12 @@
     crossOrigin: 'anonymous'
   });
 
+  const view = new ol.View({
+    constrainResolution: true,
+    center: [0, 0],
+    zoom: 2
+  });
+
   const map = new ol.Map({
     layers: [
       new ol.layer.Tile({
@@ -61,55 +70,96 @@
       })
     ],
     target: 'map',
-    view: new ol.View({
-      constrainResolution: true,
-      center: [0, 0],
-      zoom: 2
-    })
+    view: view,
   });
 
-  let roverPoint = null;
+  let rover = null;
+
+  const stroke = new ol.style.Stroke({color: 'white', width: 2});
+  const fill = new ol.style.Fill({color: 'red'});
+  const shape = new ol.style.RegularShape({
+    fill: fill,
+    stroke: stroke,
+    points: 3,
+    radius: 30,
+    rotation: Math.PI / 4,
+    angle: 0,
+    scale: [0.5, 1]
+  });
+
+  const triangleStyle = [new ol.style.Style({
+    image: shape,
+  })]
+
+  let mapLayer = null;
 
   function setupRoverPoint(coordinates) {
-    roverPoint = new ol.geom.Point(ol.proj.fromLonLat(coordinates));
+    rover = new ol.geom.Point(ol.proj.fromLonLat(coordinates));
+    const feature = new ol.Feature({
+      geometry: rover,
+    });
 
-    const layer = new ol.layer.Vector({
+    feature.setStyle(triangleStyle);
+
+    mapLayer = new ol.layer.Vector({
+      updateWhileInteracting: true,
       source: new ol.source.Vector({
         features: [
-          new ol.Feature({
-            geometry: roverPoint
-          })
+          feature
         ]
       })
     });
 
-    map.addLayer(layer);
+    map.addLayer(mapLayer);
   }
 
+  setupRoverPoint([0, 0]);
   const socket = io();
 
   socket.on("connect", () => {
-    console.log("WebSocket connected:", socket.id); // x8WIv7-mJelg7on_ALbx
+    console.log("WebSocket connected:", socket.id);
   });
 
   socket.on("connect_error", () => {
-    console.log("Websocket failed to connect:", socket.id); // undefined
+    console.log("Websocket failed to connect:", socket.id);
   });
 
   socket.on('position', (gpsData) => {
     const coordinates = [gpsData.lon, gpsData.lat];
 
-    if (!roverPoint) {
+    if (!rover) {
       setupRoverPoint(coordinates);
     } else {
-      roverPoint.setCoordinates(ol.proj.fromLonLat(coordinates));
+      rover.setCoordinates(ol.proj.fromLonLat(coordinates));
+      // view.fit(rover, {padding: [170, 50, 30, 150]})
     }
 
     $('#position').innerText = `lat: ${gpsData.lat}; lon: ${gpsData.lon}`
   })
 
+  const setHeadingRot = _.throttle((heading) => {
+    shape.setRotation(heading * (Math.PI / 180));
+    mapLayer.getSource().changed();
+  }, 500);
+
   socket.on('heading', (heading) => {
     $('#heading').innerText = `${heading} deg`;
+    setHeadingRot(heading);
+  })
+
+  $('#autonomous').addEventListener('click', () => {
+    socket.emit('autonomous');
+  })
+
+  $('#find').addEventListener('click', () => {
+    socket.emit('find');
+    console.log('LETS GO!');
+  })
+
+  socket.on('navigator', ({currentDestination}) => {
+    const destination = [currentDestination.longitude, currentDestination.latitude];
+
+
   })
 
   const control = {left: 0, right: 0};
@@ -123,7 +173,7 @@
     input.addEventListener('input', (e) => {
       control[e.target.name] = e.target.value;
       emitControls();
-    })
+    });
 
     input.addEventListener('mouseup', (e) => {
       input.value = 0;

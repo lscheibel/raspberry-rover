@@ -1,9 +1,11 @@
 import { SlidingBuffer } from './utils/SlidingBuffer.js';
-import { ParsedGpsDataType } from './main.js';
+import { ParsedGpsDataNMEAType } from './main.js';
+import Timeout = NodeJS.Timeout;
+import { navigator } from './Autonomous.js';
 
 interface GPSData {
   time: Date;
-  nmeaType: ParsedGpsDataType;
+  nmeaType: ParsedGpsDataNMEAType;
   lat: number;
   lon: number;
 }
@@ -11,4 +13,7 @@ interface GPSData {
 export const store = {
   position: new SlidingBuffer<GPSData>(100),
   heading: new SlidingBuffer<number>(100),
+  currentEngine: [0, 0],
+  autonomous: null as Timeout | null,
+  navigator: navigator,
 };

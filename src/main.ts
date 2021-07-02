@@ -5,28 +5,35 @@ import { httpServer } from './server/server.js';
 import { Gpio } from 'pigpio';
 import HMC5883L from 'compass-hmc5883l';
 import onDeath from 'death';
+import { clamp } from './utils/index.js';
+
+// Compass
 
 const COMPASS_BUS_NUMBER = 1;
-const compass = new HMC5883L(COMPASS_BUS_NUMBER);
+export const compass = new HMC5883L(COMPASS_BUS_NUMBER, {
+  calibration: {
+    offset: { x: 87.23500000000001, y: 4.015000000000015, z: 60.955 },
+    scale: { x: 1.149260226283725, y: 1.0995004163197335, z: 4.537800687285224 },
+  },
+});
 
 setInterval(() => {
-  compass.getHeading('x', 'y', (err: unknown, heading: number) => store.heading.push(heading));
+  compass.getHeadingDegrees('z', 'y', (err: unknown, heading: number) => store.heading.push(heading));
 }, 200);
-
-const sleep = (t: number) => new Promise((resolve) => setTimeout(() => resolve(undefined), t));
 
 const port = new SerialPort('/dev/serial0', {
   baudRate: 9600,
 });
 
 // L298N pins on raspberry
-// |19 -> IN3| |16 -> IN4|
-// |26 -> IN1| |20 -> IN2|
+// |27 -> IN3|
+// |22 -> IN1| |23 -> IN4|
+//             |24 -> IN2|
 
-const GPIO_L298N_IN_1 = 26;
-const GPIO_L298N_IN_2 = 20;
-const GPIO_L298N_IN_3 = 19;
-const GPIO_L298N_IN_4 = 16;
+const GPIO_L298N_IN_1 = 22;
+const GPIO_L298N_IN_2 = 24;
+const GPIO_L298N_IN_3 = 27;
+const GPIO_L298N_IN_4 = 23;
 
 const RTForward = new Gpio(GPIO_L298N_IN_1, { mode: Gpio.OUTPUT });
 const RTBackward = new Gpio(GPIO_L298N_IN_2, { mode: Gpio.OUTPUT });
@@ -34,21 +41,11 @@ const RTBackward = new Gpio(GPIO_L298N_IN_2, { mode: Gpio.OUTPUT });
 const LTForward = new Gpio(GPIO_L298N_IN_4, { mode: Gpio.OUTPUT });
 const LTBackward = new Gpio(GPIO_L298N_IN_3, { mode: Gpio.OUTPUT });
 
-async function forward(t: number, power = 50) {
-  RTForward.pwmWrite(power);
-  LTForward.pwmWrite(power);
-
-  await sleep(t);
-
-  RTForward.digitalWrite(0);
-  LTForward.digitalWrite(0);
-}
-
-const clamp = (v: number, min: number, max: number) => (v < min ? min : v > max ? max : v);
-
 /** @desc Takes two values between -1 and 1 for both left and right engines. */
 export const setEngines = (left: number, right: number) => {
   const MIN_POWER = 20;
+
+  store.currentEngine = [left, right];
 
   left = Math.floor(clamp(left, -1, 1) * 255);
   right = Math.floor(clamp(right, -1, 1) * 255);
@@ -76,21 +73,22 @@ const gps = new GPS();
 const serial0 = port.pipe(new SerialPort.parsers.Readline({ delimiter: '\n' }));
 
 serial0.on('data', (data) => {
-  // console.log('Incoming data: ', data);
   try {
     gps.update(data);
   } catch (e) {
-    console.log(e);
+    console.log('Error:', e);
   }
 });
 
-export type ParsedGpsDataType = 'GGA' | 'GLL' | 'RMC' | 'GSA' | 'VTG' | 'GSV' | 'ZDA' | 'GST' | 'HDT' | 'TXT';
+export type ParsedGpsDataNMEAType = 'GGA' | 'GLL' | 'RMC' | 'GSA' | 'VTG' | 'GSV' | 'ZDA' | 'GST' | 'HDT' | 'TXT';
 export type ParsedGpsData = GGA | GLL | RMC | GSA | VTG | GSV | ZDA | GST | HDT;
 
 gps.on('data', (data: ParsedGpsData) => {
   if (!data.valid) return;
 
   if (data.type === 'GGA' || data.type === 'GLL' || data.type === 'RMC') {
+    if (data.lon == null) return;
+
     store.position.push({ time: data.time, nmeaType: data.type, lat: data.lat, lon: data.lon });
   }
 });

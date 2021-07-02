@@ -14,6 +14,7 @@
   "devDependencies": {
     "@types/death": "^1.1.1",
     "@types/express": "^4.17.12",
+    "@types/geodesy": "^2.2.2",
     "@types/i2c-bus": "^5.1.0",
     "@types/lodash": "^4.14.170",
     "@types/node": "^14.14.41",
@@ -31,6 +32,7 @@
     "csv-writer": "^1.6.0",
     "death": "^1.1.0",
     "express": "^4.17.1",
+    "geodesy": "^2.2.1",
     "gps": "^0.6.0",
     "i2c-bus": "^5.2.2",
     "lodash": "^4.17.21",

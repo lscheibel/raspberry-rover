@@ -3,6 +3,9 @@ import { store } from '../data.js';
 import { Server as SocketIOServer } from 'socket.io';
 import http from 'http';
 import { setEngines } from '../main.js';
+import { startAutonomous } from '../Autonomous.js';
+import { navigator } from '../Autonomous.js';
+import { schnüffel } from '../schnueffler.js';
 
 const app = express();
 export const httpServer = http.createServer(app);
@@ -23,6 +26,7 @@ io.on('connection', (socket) => {
 
   store.position.subscribe(() => {
     socket.emit('position', store.position.latest());
+    // console.log(store.position.latest());
   });
 
   store.heading.subscribe(() => {
@@ -33,7 +37,27 @@ io.on('connection', (socket) => {
     setEngines(left, right);
   });
 
+  socket.on('find', () => {
+    console.log('*sniff*');
+    schnüffel();
+  });
+
+  socket.on('autonomous', () => {
+    if (store.autonomous) {
+      clearInterval(store.autonomous);
+      store.autonomous = null;
+    } else {
+      store.autonomous = startAutonomous();
+    }
+  });
+
+  const navigatorInterval = setInterval(() => {
+    socket.emit('navigator', { currentDestination: navigator.currentDestination });
+  }, 1000);
+
   socket.on('disconnect', () => {
     setEngines(0, 0);
+
+    clearInterval(navigatorInterval);
   });
 });
